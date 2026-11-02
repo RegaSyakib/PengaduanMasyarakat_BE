@@ -1,4 +1,6 @@
 const pool = require('../config/db');
+const fs = require('fs');
+const path = require('path');
 
 const createComplaint = async (req, res) => {
     try {
@@ -33,8 +35,7 @@ const getComplaints = async (req, res) => {
         const userId = req.user.id;
         const userRole = req.user.role;
 
-        // LaporPak: Return all complaints with like/comment counts and user like status
-        // Filter pending complaints if not admin or owner
+        // Return complaints with like/comment counts and user like status
         let query = `
             SELECT 
                 c.*,
@@ -48,8 +49,9 @@ const getComplaints = async (req, res) => {
         `;
         const params = [userId];
 
+        // Normal citizens can view public complaints (process, done, approved) plus all of their own complaints
         if (userRole !== 'admin' && userRole !== 'super_admin') {
-            query += ` WHERE c.status = 'done' OR c.user_id = ? `;
+            query += ` WHERE c.status IN ('process', 'done', 'approved') OR c.user_id = ? `;
             params.push(userId);
         }
 
@@ -65,15 +67,7 @@ const getComplaints = async (req, res) => {
 
         res.json(formattedComplaints);
     } catch (error) {
-        console.error('getComplaints() failed:', {
-            message: error?.message,
-            stack: error?.stack,
-            code: error?.code,
-            errno: error?.errno,
-            sqlMessage: error?.sqlMessage,
-            sqlState: error?.sqlState,
-            userId: req?.user?.id
-        });
+        console.error('getComplaints() failed:', error);
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -95,12 +89,11 @@ const getComplaintById = async (req, res) => {
 
         const complaint = complaints[0];
 
-        // Restrict details of unresolved complaints (not done) from other users
-        if (complaint.status !== 'done' && complaint.user_id !== userId && userRole !== 'admin' && userRole !== 'super_admin') {
+        // Restrict details of unresolved pending complaints from other users
+        if (complaint.status === 'pending' && complaint.user_id !== userId && userRole !== 'admin' && userRole !== 'super_admin') {
             return res.status(404).json({ message: 'Complaint not found' });
         }
 
-        // LaporPak: Everyone can see the complaint details
         // Get responses (queried from comments where user is admin/super_admin)
         const [responses] = await pool.query(
             `SELECT c.id, c.complaint_id, c.user_id as admin_id, c.comment as message, c.created_at, u.name as admin_name 
@@ -170,8 +163,8 @@ const deleteComplaint = async (req, res) => {
         const userId = req.user.id;
         const userRole = req.user.role;
 
-        // Fetch complaint to check ownership
-        const [complaints] = await pool.query('SELECT user_id FROM complaints WHERE id = ?', [id]);
+        // Fetch complaint to check ownership and image
+        const [complaints] = await pool.query('SELECT user_id, image FROM complaints WHERE id = ?', [id]);
         if (complaints.length === 0) {
             return res.status(404).json({ message: 'Complaint not found' });
         }
@@ -179,6 +172,15 @@ const deleteComplaint = async (req, res) => {
         const complaint = complaints[0];
         if (userRole !== 'admin' && userRole !== 'super_admin' && complaint.user_id !== userId) {
             return res.status(403).json({ message: 'Unauthorized to delete this complaint' });
+        }
+
+        // Delete image file from disk if exists
+        if (complaint.image) {
+            const cleanPath = complaint.image.startsWith('/') ? complaint.image.slice(1) : complaint.image;
+            const filePath = path.join(__dirname, '..', cleanPath);
+            fs.unlink(filePath, (err) => {
+                if (err && err.code !== 'ENOENT') console.log('Error deleting complaint image file:', err.message);
+            });
         }
 
         await pool.query('DELETE FROM complaints WHERE id = ?', [id]);
@@ -199,12 +201,18 @@ const updateComplaint = async (req, res) => {
         // Check if complaint exists
         const [complaints] = await pool.query('SELECT * FROM complaints WHERE id = ?', [id]);
         if (complaints.length === 0) {
+            if (req.file) {
+                fs.unlink(req.file.path, () => {});
+            }
             return res.status(404).json({ message: 'Complaint not found' });
         }
 
         const complaint = complaints[0];
         // Check ownership
-        if (complaint.user_id !== userId) {
+        if (complaint.user_id !== userId && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+            if (req.file) {
+                fs.unlink(req.file.path, () => {});
+            }
             return res.status(403).json({ message: 'Unauthorized to edit this complaint' });
         }
 
@@ -219,6 +227,15 @@ const updateComplaint = async (req, res) => {
         if (newImage) {
             query += ', image = ?';
             params.push(newImage);
+
+            // Delete old image file from disk
+            if (complaint.image) {
+                const cleanOldPath = complaint.image.startsWith('/') ? complaint.image.slice(1) : complaint.image;
+                const oldFilePath = path.join(__dirname, '..', cleanOldPath);
+                fs.unlink(oldFilePath, (err) => {
+                    if (err && err.code !== 'ENOENT') console.log('Error removing old complaint image:', err.message);
+                });
+            }
         }
 
         if (latitude !== undefined) {
@@ -237,6 +254,9 @@ const updateComplaint = async (req, res) => {
 
         res.json({ message: 'Complaint updated successfully' });
     } catch (error) {
+        if (req.file) {
+            fs.unlink(req.file.path, () => {});
+        }
         console.error('updateComplaint error:', error);
         res.status(500).json({ message: 'Server error' });
     }
@@ -282,6 +302,32 @@ const markNotificationAsRead = async (req, res) => {
     }
 };
 
+const deleteNotification = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userId = req.user.id;
+        const userRole = req.user.role;
+
+        let query = 'DELETE FROM notifications WHERE id = ?';
+        const params = [id];
+
+        if (userRole !== 'admin' && userRole !== 'super_admin') {
+            query += ' AND user_id = ?';
+            params.push(userId);
+        }
+
+        const [result] = await pool.query(query, params);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: 'Notification not found' });
+        }
+
+        res.json({ message: 'Notification deleted successfully' });
+    } catch (error) {
+        console.error('deleteNotification error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
 module.exports = { 
     createComplaint, 
     getComplaints, 
@@ -290,5 +336,6 @@ module.exports = {
     deleteComplaint, 
     getUserNotifications,
     markNotificationAsRead,
-    updateComplaint
+    updateComplaint,
+    deleteNotification
 };

@@ -8,7 +8,8 @@ const {
     deleteComplaint, 
     getUserNotifications,
     markNotificationAsRead,
-    updateComplaint
+    updateComplaint,
+    deleteNotification
 } = require('../controllers/complaintController');
 const { toggleLike, addComment, getComments } = require('../controllers/interactionController');
 const { verifyToken, verifyAdmin } = require('../middleware/auth');
@@ -29,6 +30,7 @@ router.post('/', verifyToken, (req, res, next) => {
 router.get('/', verifyToken, getComplaints);
 router.get('/notifications', verifyToken, getUserNotifications);
 router.put('/notifications/:id/read', verifyToken, markNotificationAsRead);
+router.delete('/notifications/:id', verifyToken, deleteNotification);
 router.get('/:id', verifyToken, getComplaintById);
 router.put('/:id', verifyToken, (req, res, next) => {
     upload.single('image')(req, res, (err) => {

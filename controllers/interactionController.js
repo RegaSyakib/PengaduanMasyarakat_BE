@@ -13,8 +13,8 @@ const toggleLike = async (req, res) => {
             return res.status(404).json({ message: 'Complaint not found' });
         }
         const complaint = complaints[0];
-        if (complaint.status !== 'done' && complaint.user_id !== userId && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
-            return res.status(404).json({ message: 'Complaint not found' });
+        if (complaint.status === 'rejected' && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+            return res.status(403).json({ message: 'Laporan yang ditolak tidak dapat disukai' });
         }
 
         // Check if user already liked it
@@ -44,7 +44,7 @@ const addComment = async (req, res) => {
         const userId = req.user.id;
 
         if (!comment || comment.trim() === '') {
-            return res.status(400).json({ message: 'Comment cannot be empty' });
+            return res.status(400).json({ message: 'Komentar tidak boleh kosong' });
         }
 
         // Check if complaint exists
@@ -53,8 +53,8 @@ const addComment = async (req, res) => {
             return res.status(404).json({ message: 'Complaint not found' });
         }
         const complaint = complaints[0];
-        if (complaint.status !== 'done' && complaint.user_id !== userId && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
-            return res.status(404).json({ message: 'Complaint not found' });
+        if (complaint.status === 'rejected' && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+            return res.status(403).json({ message: 'Laporan yang ditolak tidak dapat dikomentari' });
         }
 
         const [result] = await pool.query(
@@ -78,10 +78,6 @@ const getComments = async (req, res) => {
         // Check if complaint exists
         const [complaints] = await pool.query('SELECT user_id, status FROM complaints WHERE id = ?', [id]);
         if (complaints.length === 0) {
-            return res.status(404).json({ message: 'Complaint not found' });
-        }
-        const complaint = complaints[0];
-        if (complaint.status !== 'done' && complaint.user_id !== userId && userRole !== 'admin' && userRole !== 'super_admin') {
             return res.status(404).json({ message: 'Complaint not found' });
         }
 

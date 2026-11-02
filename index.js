@@ -24,27 +24,28 @@ const allowedOrigins = [
 
 app.use(cors({
     origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps or curl)
+        // Allow requests with no origin (like mobile apps, curl, postman)
         if (
             !origin || 
             allowedOrigins.includes(origin) || 
             /^https?:\/\/localhost:\d+$/.test(origin) || 
             /^https?:\/\/127\.0\.0\.1:\d+$/.test(origin) ||
             /^https?:\/\/192\.168\.\d+\.\d+:\d+$/.test(origin) ||
-            /^https?:\/\/10\.\d+\.\d+\.\d+:\d+$/.test(origin)
+            /^https?:\/\/10\.\d+\.\d+\.\d+:\d+$/.test(origin) ||
+            /^https?:\/\/172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+:\d+$/.test(origin)
         ) {
             callback(null, true);
         } else {
-            callback(new Error('Not allowed by CORS'));
+            callback(null, false);
         }
     },
     credentials: true
 }));
 
-// Rate Limiting
+// Rate Limiting (1000 requests per 15 minutes to allow smooth multi-user development & polling)
 const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 200, // Limit each IP to 200 requests per 15 minutes
+    windowMs: 15 * 60 * 1000,
+    max: 1000,
     message: { message: 'Too many requests from this IP, please try again after 15 minutes' }
 });
 app.use(limiter);
